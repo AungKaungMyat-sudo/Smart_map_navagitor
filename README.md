@@ -1,6 +1,6 @@
 # 📍 SkyLink AI Logistics - Smart Map Navigator
 
-Prolog Logic Engine နှင့် Google Maps API ကို အသုံးပြု၍ မြန်မာနိုင်ငံရှိ မြို့များအကြား အတိုဆုံးနှင့် အကောင်းဆုံးလမ်းကြောင်းကို ရှာဖွေပေးသည့် Full-Stack Web Application ဖြစ်ပါသည်။
+A Full-Stack Web Application that calculates the shortest and most efficient routes between cities in Myanmar using a Prolog Logic Engine and Google Maps API.
 
 ---
 
