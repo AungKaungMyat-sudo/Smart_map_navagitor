@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Map Navigator</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&family=Fira+Code:wght@400;500&display=swap');
+
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #010409; color: #f8fafc; overflow: hidden; }
+        #map { height: calc(100vh - 80px); width: 100%; border-radius: 0 0 24px 24px; z-index: 1; }
+        .glass-panel { background: rgba(13, 17, 23, 0.92); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .terminal-font { font-family: 'Fira Code', monospace; }
+
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+
+        .path-scan-active {
+            stroke-dasharray: 4, 8;
+            stroke-linecap: round;
+            animation: scan-dash 0.4s linear infinite;
+            filter: drop-shadow(0 0 3px #ef4444);
+        }
+        @keyframes scan-dash { to { stroke-dashoffset: -12; } }
+
+        .road-route {
+            filter: drop-shadow(0 0 8px #10b981);
+            stroke-dasharray: 10, 15;
+            stroke-linecap: round;
+            animation: road-move 15s linear infinite;
+        }
+        @keyframes road-move { to { stroke-dashoffset: -200; } }
+
+        .air-route {
+            stroke-dasharray: 5, 10;
+            filter: drop-shadow(0 0 5px #3b82f6);
+            opacity: 0.8;
+        }
+
+        .plane-icon {
+            color: #3b82f6;
+            font-size: 22px;
+            text-shadow: 0 0 15px rgba(59, 130, 246, 0.9);
+            z-index: 1000;
+        }
+
+        select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1em;
+        }
+        option { background-color: #0d1117; color: white; }
+        .logo-glow { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
+    </style>
+</head>
+<body>
+    <header class="h-20 glass-panel flex items-center justify-between px-6 z-50 relative border-b border-white/5">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-gradient-to-tr from-blue-700 via-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-2xl logo-glow rotate-12 hover:rotate-0 transition-transform duration-500">
+                <i class="fas fa-location-arrow text-white text-2xl"></i>
+            </div>
+            <div>
+                <h1 class="font-extrabold text-xl tracking-tight uppercase bg-clip-text text-transparent bg-gradient-to-r from-white via-blue-100 to-blue-400">Smart Map Navigator</h1>
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
+                    <p class="text-[9px] text-blue-400 font-bold tracking-[0.25em] uppercase">Myanmar Logistics Engine</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 bg-black/60 p-1.5 rounded-xl border border-white/10 shadow-inner">
+                <select id="startInput" class="bg-transparent px-4 py-1.5 text-xs outline-none w-32 md:w-44 text-white border-r border-white/10 cursor-pointer hover:bg-white/5 transition-colors">
+                    <option value="" disabled selected>Select Origin</option>
+                </select>
+                <select id="goalInput" class="bg-transparent px-4 py-1.5 text-xs outline-none w-32 md:w-44 text-white cursor-pointer hover:bg-white/5 transition-colors">
+                    <option value="" disabled selected>Select Destination</option>
+                </select>
+            </div>
+            <button onclick="runAnalysis()" id="computeBtn" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-2.5 rounded-xl font-black text-[11px] transition-all flex items-center gap-2 uppercase tracking-wider shadow-lg shadow-blue-900/20 active:scale-95">
+                Analyze Path
+            </button>
+        </div>
+    </header>
+
+    <div class="flex h-[calc(100vh-80px)]">
+        <aside class="w-80 glass-panel border-t-0 border-l-0 p-5 hidden md:flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Network Logic</h2>
+                <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[9px] font-bold border border-blue-500/20">LIVE</span>
+            </div>
+            <div id="logicTerminal" class="flex-1 terminal-font text-[10px] text-blue-100/60 bg-black/95 p-4 rounded-xl border border-white/5 overflow-y-auto custom-scroll shadow-inner">
+                <div class="text-blue-500 font-bold mb-2">> System Ready...</div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-white/5 grid grid-cols-2 gap-2">
+                <button onclick="clearSystemData()" class="py-2 text-[9px] font-bold text-slate-400 border border-white/10 rounded-lg hover:bg-white/5 transition-all uppercase">Reset</button>
+                <button onclick="map.flyTo([19.5, 96.0], 6)" class="py-2 text-[9px] font-bold text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/10 transition-all uppercase">Center Map</button>
+            </div>
+        </aside>
+
+        <main class="flex-1 relative">
+            <div id="map"></div>
+
+            <div id="resultOverlay" class="absolute bottom-6 right-6 bg-black/90 backdrop-blur-2xl p-6 rounded-3xl border border-white/10 hidden z-[1000] shadow-2xl min-w-[200px] animate-in slide-in-from-bottom-4 duration-300">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                        <i class="fas fa-route text-emerald-400 text-xs"></i>
+                    </div>
+                    <h3 class="text-xs font-bold text-white uppercase tracking-widest">Route Report</h3>
+                </div>
+                <div class="space-y-4">
+                    <div class="group">
+                        <p class="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 group-hover:text-blue-400 transition-colors">Air Distance (Direct)</p>
+                        <p id="nmVal" class="text-xl font-black text-blue-400">0 KM</p>
+                    </div>
+                    <div class="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+                    <div class="group">
+                        <p class="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 group-hover:text-emerald-400 transition-colors">Road Network (Est.)</p>
+                        <p id="kmVal" class="text-xl font-black text-emerald-400">0 KM</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const CITIES = {
+            "Yangon": { pos: [16.8661, 96.1951], neighbors: ["Naypyidaw", "Bago", "Pathein", "Mawlamyine", "Henzada"] },
+            "Bago": { pos: [17.3304, 96.4814], neighbors: ["Yangon", "Naypyidaw", "Hpa-An", "Pyay", "Taungoo"] },
+            "Hpa-An": { pos: [16.8904, 97.6366], neighbors: ["Bago", "Mawlamyine", "Myawaddy"] },
+            "Mawlamyine": { pos: [16.4870, 97.6330], neighbors: ["Yangon", "Dawei", "Hpa-An"] },
+            "Dawei": { pos: [14.0828, 98.1940], neighbors: ["Mawlamyine", "Myeik"] },
+            "Myeik": { pos: [12.4381, 98.5996], neighbors: ["Dawei", "Kawthaung"] },
+            "Kawthaung": { pos: [9.9833, 98.5500], neighbors: ["Myeik"] },
+            "Myawaddy": { pos: [16.6833, 98.5167], neighbors: ["Hpa-An"] },
+            "Pathein": { pos: [16.7754, 94.7381], neighbors: ["Henzada", "Yangon", "Ngwesaung", "Myaungmya"] },
+            "Ngwesaung": { pos: [16.8631, 94.3833], neighbors: ["Pathein"] },
+            "Myaungmya": { pos: [16.5833, 94.9167], neighbors: ["Pathein", "Labutta"] },
+            "Labutta": { pos: [16.1500, 94.7667], neighbors: ["Myaungmya"] },
+            "Henzada": { pos: [17.6500, 95.4500], neighbors: ["Pathein", "Kyangin", "Yangon", "Pyay"] },
+            "Kyangin": { pos: [18.3300, 95.2400], neighbors: ["Pyay", "Henzada", "Thandwe"] },
+            "Naypyidaw": { pos: [19.7633, 96.0785], neighbors: ["Yangon", "Mandalay", "Pyay", "Bago", "Heho", "Taungoo", "Magway", "Yamethin"] },
+            "Taungoo": { pos: [18.9333, 96.4333], neighbors: ["Bago", "Naypyidaw", "Loikaw"] },
+            "Pyay": { pos: [18.8239, 95.2267], neighbors: ["Naypyidaw", "Kyangin", "Bago", "Thandwe", "Henzada", "Magway"] },
+            "Magway": { pos: [20.1500, 94.9167], neighbors: ["Naypyidaw", "Pyay", "Nyaung-U", "Minbu", "Taungdwingyi"] },
+            "Minbu": { pos: [20.1833, 94.8833], neighbors: ["Magway", "Ann"] },
+            "Taungdwingyi": { pos: [20.0167, 95.5333], neighbors: ["Magway", "Yamethin"] },
+            "Yamethin": { pos: [20.4333, 96.1500], neighbors: ["Naypyidaw", "Taungdwingyi", "Meiktila"] },
+            "Meiktila": { pos: [20.8833, 95.8667], neighbors: ["Yamethin", "Mandalay", "Nyaung-U", "Myingyan"] },
+            "Mandalay": { pos: [21.9588, 96.0891], neighbors: ["Naypyidaw", "Heho", "Myitkyina", "Nyaung-U", "Lashio", "Sagaing", "Pyin Oo Lwin", "Meiktila"] },
+            "Pyin Oo Lwin": { pos: [22.0333, 96.4667], neighbors: ["Mandalay", "Lashio"] },
+            "Sagaing": { pos: [21.8787, 95.9791], neighbors: ["Mandalay", "Monywa", "Shwebo"] },
+            "Monywa": { pos: [22.1167, 95.1333], neighbors: ["Sagaing", "Shwebo", "Pakokku", "Kalay"] },
+            "Shwebo": { pos: [22.5667, 95.7000], neighbors: ["Sagaing", "Monywa", "Katha"] },
+            "Nyaung-U": { pos: [21.1786, 94.9100], neighbors: ["Mandalay", "Pyay", "Magway", "Pakokku", "Meiktila"] },
+            "Pakokku": { pos: [21.3333, 95.0833], neighbors: ["Nyaung-U", "Monywa", "Mindat"] },
+            "Myingyan": { pos: [21.4667, 95.3833], neighbors: ["Meiktila", "Mandalay"] },
+            "Heho": { pos: [20.7454, 96.7972], neighbors: ["Naypyidaw", "Taunggyi", "Inle", "Mandalay"] },
+            "Taunggyi": { pos: [20.7833, 97.0333], neighbors: ["Heho", "Loikaw", "Kengtung"] },
+            "Inle": { pos: [20.5000, 96.9000], neighbors: ["Heho"] },
+            "Loikaw": { pos: [19.6667, 97.2167], neighbors: ["Taunggyi", "Taungoo"] },
+            "Lashio": { pos: [22.9749, 97.7511], neighbors: ["Pyin Oo Lwin", "Muse"] },
+            "Muse": { pos: [23.9833, 97.9000], neighbors: ["Lashio"] },
+            "Kengtung": { pos: [21.2833, 99.6000], neighbors: ["Taunggyi", "Tachileik"] },
+            "Tachileik": { pos: [20.4431, 99.8814], neighbors: ["Kengtung"] },
+            "Sittwe": { pos: [20.1332, 92.8732], neighbors: ["Thandwe", "Nyaung-U", "Mrauk-U"] },
+            "Mrauk-U": { pos: [20.6000, 93.2000], neighbors: ["Sittwe", "Ann"] },
+            "Ann": { pos: [19.7833, 94.0333], neighbors: ["Mrauk-U", "Minbu"] },
+            "Thandwe": { pos: [18.4633, 94.2989], neighbors: ["Sittwe", "Pyay", "Kyangin", "Gwa"] },
+            "Gwa": { pos: [17.5833, 94.5833], neighbors: ["Thandwe"] },
+            "Mindat": { pos: [21.3667, 93.9833], neighbors: ["Pakokku", "Hakha"] },
+            "Hakha": { pos: [22.6422, 93.6067], neighbors: ["Mindat", "Falam"] },
+            "Falam": { pos: [22.9167, 93.6833], neighbors: ["Hakha", "Kalay"] },
+            "Myitkyina": { pos: [25.3831, 97.3964], neighbors: ["Mandalay", "Bhamo", "Putao"] },
+            "Bhamo": { pos: [24.2667, 97.2333], neighbors: ["Myitkyina", "Katha"] },
+            "Katha": { pos: [24.1833, 96.3333], neighbors: ["Bhamo", "Shwebo"] },
+            "Putao": { pos: [27.3333, 97.4000], neighbors: ["Myitkyina"] },
+            "Kalay": { pos: [23.2000, 94.0500], neighbors: ["Falam", "Monywa", "Tamu"] },
+            "Tamu": { pos: [24.2167, 94.3000], neighbors: ["Kalay"] }
+        };
+
+        const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([19.5, 96.0], 6);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        const routeLayer = L.layerGroup().addTo(map);
+        const scanLayer = L.layerGroup().addTo(map);
+        const airportLayer = L.layerGroup().addTo(map);
+        let planeMarker = null;
+        let animationFrame = null;
+
+        function initDropdowns() {
+            const startSelect = document.getElementById('startInput');
+            const goalSelect = document.getElementById('goalInput');
+            const sortedCities = Object.keys(CITIES).sort();
+
+            sortedCities.forEach(name => {
+                startSelect.add(new Option(name, name));
+                goalSelect.add(new Option(name, name));
+
+                L.circleMarker(CITIES[name].pos, {
+                    radius: 3, fillColor: "#3b82f6", color: "#fff", weight: 1, opacity: 0.8, fillOpacity: 0.6
+                }).bindTooltip(name, { className: 'bg-black text-white border-0 text-[10px] rounded' })
+                  .addTo(airportLayer);
+            });
+        }
+        initDropdowns();
+
+        const terminal = document.getElementById('logicTerminal');
+        function log(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = "mb-1.5 leading-relaxed " + (type === 'success' ? 'text-emerald-400' : (type === 'error' ? 'text-red-400' : 'text-blue-300/50'));
+            div.innerHTML = `<span class="opacity-30">${new Date().toLocaleTimeString([], {hour12:false})}</span> > ${msg}`;
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        async function fetchRealRoadRoute(cityNames) {
+            const waypoints = cityNames
+                .map(name => `${CITIES[name].pos[1]},${CITIES[name].pos[0]}`)
+                .join(';');
+            const url = `https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson`;
+
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error('Road routing service unavailable.');
+            }
+
+            const data = await response.json();
+            if (data.code !== 'Ok' || !data.routes?.length) {
+                throw new Error('No drivable road route found.');
+            }
+
+            const route = data.routes[0];
+            const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+            return { coords, distanceMeters: route.distance };
+        }
+
+        async function runAnalysis() {
+            const start = document.getElementById('startInput').value;
+            const goal = document.getElementById('goalInput').value;
+
+            if (!start || !goal) return log("Select both origin and destination", "error");
+            if (start === goal) return log("Origin and destination must differ", "error");
+
+            document.getElementById('computeBtn').disabled = true;
+
+            scanLayer.clearLayers();
+            routeLayer.clearLayers();
+            if (planeMarker) {
+                map.removeLayer(planeMarker);
+                planeMarker = null;
+            }
+            if (animationFrame) cancelAnimationFrame(animationFrame);
+            document.getElementById('resultOverlay').classList.add('hidden');
+
+            log(`Initiating pathfinding: ${start} to ${goal}`);
+            map.flyTo(CITIES[start].pos, 7, { duration: 1.5 });
+            await new Promise(r => setTimeout(r, 1600));
+
+            const visited = new Set();
+            let currentLevel = [start];
+            visited.add(start);
+            let found = false;
+
+            while (currentLevel.length > 0 && !found) {
+                let nextLevel = [];
+                const animations = currentLevel.map(async (cityName) => {
+                    const neighbors = CITIES[cityName].neighbors;
+                    for (let n of neighbors) {
+                        if (!visited.has(n)) {
+                            visited.add(n);
+                            nextLevel.push(n);
+                            L.polyline([CITIES[cityName].pos, CITIES[n].pos], {
+                                color: '#ef4444', weight: 1.5, opacity: 0.5, className: 'path-scan-active'
+                            }).addTo(scanLayer);
+                            if (n === goal) found = true;
+                        }
+                    }
+                });
+                await Promise.all(animations);
+                await new Promise(r => setTimeout(r, 150));
+                currentLevel = nextLevel;
+                if (found) break;
+            }
+
+            const roadPath = calculateShortestPath(start, goal);
+            await new Promise(r => setTimeout(r, 400));
+            scanLayer.clearLayers();
+
+            if (roadPath) {
+                log('Fetching real road geometry...');
+                let roadCoords = roadPath.map(c => CITIES[c].pos);
+                let roadDist = 0;
+                for (let i = 0; i < roadPath.length - 1; i++) {
+                    roadDist += map.distance(CITIES[roadPath[i]].pos, CITIES[roadPath[i + 1]].pos);
+                }
+
+                try {
+                    const realRoute = await fetchRealRoadRoute(roadPath);
+                    roadCoords = realRoute.coords;
+                    roadDist = realRoute.distanceMeters;
+                    log('Road network matched to OpenStreetMap.', 'success');
+                } catch (error) {
+                    log(error.message || 'Using estimated route lines.', 'error');
+                }
+
+                const roadLine = L.polyline(roadCoords, {
+                    color: '#10b981', weight: 5, opacity: 0.9, className: 'road-route', smoothFactor: 1
+                }).addTo(routeLayer);
+
+                L.polyline([CITIES[start].pos, CITIES[goal].pos], {
+                    color: '#3b82f6', weight: 2, opacity: 0.6, className: 'air-route'
+                }).addTo(routeLayer);
+
+                const airDist = map.distance(CITIES[start].pos, CITIES[goal].pos);
+
+                document.getElementById('nmVal').innerText = `${(airDist / 1000).toFixed(1)} KM`;
+                document.getElementById('kmVal').innerText = `${(roadDist / 1000).toFixed(1)} KM`;
+                document.getElementById('resultOverlay').classList.remove('hidden');
+
+                log(`Path Found: ${roadPath.join(' → ')}`, "success");
+                log(`Total Distance: ${(roadDist / 1000).toFixed(1)} KM`, "success");
+
+                map.flyToBounds(roadLine.getBounds(), { padding: [100, 100], duration: 1.5 });
+                animatePlane(CITIES[start].pos, CITIES[goal].pos);
+            } else {
+                log("No viable path found within current network", "error");
+            }
+            document.getElementById('computeBtn').disabled = false;
+        }
+
+        function animatePlane(start, end) {
+            if (planeMarker) {
+                map.removeLayer(planeMarker);
+            }
+            if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
+            }
+
+            const startTime = performance.now();
+            const duration = 6000;
+            const angle = Math.atan2(end[1] - start[1], end[0] - start[0]) * 180 / Math.PI;
+
+            planeMarker = L.marker(start, {
+                icon: L.divIcon({
+                    className: 'plane-container',
+                    html: `<i class="fas fa-plane plane-icon" style="transform: rotate(${angle - 45}deg);"></i>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                })
+            }).addTo(map);
+
+            function step(now) {
+                const elapsed = now - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+
+                const currentLat = start[0] + (end[0] - start[0]) * progress;
+                const currentLng = start[1] + (end[1] - start[1]) * progress;
+
+                if (planeMarker) {
+                    planeMarker.setLatLng([currentLat, currentLng]);
+                }
+
+                if (progress < 1) {
+                    animationFrame = requestAnimationFrame(step);
+                } else {
+                    setTimeout(() => {
+                        if (planeMarker && map.hasLayer(planeMarker)) {
+                            animatePlane(start, end);
+                        }
+                    }, 2000);
+                }
+            }
+            animationFrame = requestAnimationFrame(step);
+        }
+
+        function calculateShortestPath(start, end) {
+            let dist = {}; let prev = {}; let q = new Set();
+            Object.keys(CITIES).forEach(c => { dist[c] = Infinity; prev[c] = null; q.add(c); });
+            dist[start] = 0;
+            while (q.size > 0) {
+                let u = Array.from(q).reduce((a, b) => dist[a] < dist[b] ? a : b);
+                if (u === end || dist[u] === Infinity) break;
+                q.delete(u);
+                (CITIES[u].neighbors || []).forEach(v => {
+                    if (!q.has(v)) return;
+                    let d = map.distance(CITIES[u].pos, CITIES[v].pos);
+                    if (dist[u] + d < dist[v]) { dist[v] = dist[u] + d; prev[v] = u; }
+                });
+            }
+            let path = []; let curr = end;
+            while (curr) { path.unshift(curr); curr = prev[curr]; }
+            return path[0] === start ? path : null;
+        }
+
+        function clearSystemData() {
+            scanLayer.clearLayers();
+            routeLayer.clearLayers();
+            if (planeMarker) {
+                map.removeLayer(planeMarker);
+                planeMarker = null;
+            }
+            if (animationFrame) cancelAnimationFrame(animationFrame);
+            document.getElementById('resultOverlay').classList.add('hidden');
+            document.getElementById('startInput').selectedIndex = 0;
+            document.getElementById('goalInput').selectedIndex = 0;
+            terminal.innerHTML = '<div class="text-blue-500 font-bold mb-2">> System Reset...</div>';
+            map.flyTo([19.5, 96.0], 6, { duration: 1.5 });
+        }
+    </script>
+</body>
+</html>
